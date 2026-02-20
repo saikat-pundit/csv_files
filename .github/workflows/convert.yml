@@ -26,7 +26,7 @@ jobs:
     - name: Checkout repository
       uses: actions/checkout@v3
       with:
-        token: ${{ secrets.GITHUB_TOKEN }}  # Use the built-in token
+        token: ${{ secrets.GITHUB_TOKEN }}
     
     - name: Set up Python
       uses: actions/setup-python@v4
@@ -41,26 +41,32 @@ jobs:
     - name: Create CSV directory
       run: mkdir -p CSV
     
+    - name: Get next CSV number
+      id: get_number
+      run: |
+        # Find the highest numbered csv file in CSV folder
+        if ls CSV/csv*.csv 1> /dev/null 2>&1; then
+          MAX_NUM=$(ls CSV/csv*.csv | grep -o '[0-9]\+' | sort -n | tail -1)
+          NEXT_NUM=$((MAX_NUM + 1))
+        else
+          NEXT_NUM=1
+        fi
+        echo "next_num=$NEXT_NUM" >> $GITHUB_OUTPUT
+        echo "Next CSV number will be: $NEXT_NUM"
+    
     - name: Download from Google Drive (if URL or ID provided)
       if: ${{ github.event.inputs.gdrive_url != '' || github.event.inputs.gdrive_id != '' }}
       run: |
         if [ -n "${{ github.event.inputs.gdrive_url }}" ]; then
-          python scripts/convert_to_csv.py --gdrive-url "${{ github.event.inputs.gdrive_url }}" --output CSV
+          python scripts/convert_to_csv.py --gdrive-url "${{ github.event.inputs.gdrive_url }}" --output CSV --filename "csv${{ steps.get_number.outputs.next_num }}"
         else
-          python scripts/convert_to_csv.py --gdrive-id "${{ github.event.inputs.gdrive_id }}" --output CSV
+          python scripts/convert_to_csv.py --gdrive-id "${{ github.event.inputs.gdrive_id }}" --output CSV --filename "csv${{ steps.get_number.outputs.next_num }}"
         fi
     
     - name: Convert local file
       if: ${{ github.event.inputs.local_file != '' }}
       run: |
-        python scripts/convert_to_csv.py --input "${{ github.event.inputs.local_file }}" --output CSV
-    
-    - name: Upload CSV artifacts
-      uses: actions/upload-artifact@v4
-      with:
-        name: converted-csv-files
-        path: CSV/
-        retention-days: 30
+        python scripts/convert_to_csv.py --input "${{ github.event.inputs.local_file }}" --output CSV --filename "csv${{ steps.get_number.outputs.next_num }}"
     
     - name: Commit and push CSV files
       run: |
