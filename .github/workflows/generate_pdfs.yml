@@ -28,8 +28,6 @@ jobs:
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
-      with:
-        token: ${{ secrets.GITHUB_TOKEN }}
     
     - name: Set up Python
       uses: actions/setup-python@v5
@@ -39,7 +37,7 @@ jobs:
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install -r requirements.txt
+        pip install pandas fpdf2 requests
     
     - name: Create PDFs directory
       run: mkdir -p pdfs
@@ -52,39 +50,51 @@ jobs:
           --start-row ${{ github.event.inputs.start_row }} \
           --end-row ${{ github.event.inputs.end_row }}
     
+    - name: Create ZIP of PDFs
+      run: |
+        cd pdfs
+        zip -r ../pdfs.zip *.pdf summary.txt
+        cd ..
+    
     - name: Create Release
       id: create_release
-      uses: softprops/action-gh-release@v1
+      uses: actions/create-release@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
-        name: "PDFs Release - Rows ${{ github.event.inputs.start_row }} to ${{ github.event.inputs.end_row }}"
-        tag_name: "pdfs-v${{ github.run_number }}"
-        files: |
-          pdfs/*.pdf
-          pdfs/summary.txt
+        tag_name: pdfs-${{ github.run_number }}
+        release_name: "PDFs for Rows ${{ github.event.inputs.start_row }}-${{ github.event.inputs.end_row }}"
         body: |
           ## PDF Generation Summary
           
           - **Source:** CSV from Google Sheets
           - **Rows processed:** ${{ github.event.inputs.start_row }} to ${{ github.event.inputs.end_row }}
-          - **Generated:** $(date -u)
-          - **Total PDFs:** ${{ github.event.inputs.end_row - github.event.inputs.start_row + 1 }}
+          - **Generated:** ${{ github.event.repository.updated_at }}
           
-          ### File List
-          $(for file in pdfs/*.pdf; do echo "- ${file##*/}"; done)
+          ### Files Generated:
+          $(ls pdfs/*.pdf | xargs -n1 basename | sed 's/^/- /')
         draft: false
         prerelease: false
+    
+    - name: Upload PDFs to Release
+      uses: actions/upload-release-asset@v1
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ steps.create_release.outputs.upload_url }}
+        asset_path: ./pdfs.zip
+        asset_name: pdfs_rows_${{ github.event.inputs.start_row }}_to_${{ github.event.inputs.end_row }}.zip
+        asset_content_type: application/zip
     
-    - name: Upload PDFs as Artifacts (Backup)
+    - name: Upload PDFs as Artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: generated-pdfs
+        name: generated-pdfs-rows-${{ github.event.inputs.start_row }}-to-${{ github.event.inputs.end_row }}
         path: pdfs/
         retention-days: 30
     
     - name: Commit PDFs to Repository (Optional)
-      if: false  # Set to true if you want PDFs in repo
+      if: false
       run: |
         git config --local user.email "github-actions[bot]@users.noreply.github.com"
         git config --local user.name "github-actions[bot]"
