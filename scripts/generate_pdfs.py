@@ -2,7 +2,7 @@
 """
 Generate PDFs from specific columns (AW to BB) of CSV rows
 Each row becomes a separate PDF with format: COLUMN HEADER: <ROW DATA>
-Filename is taken from column AZ (index 51) and shown in the middle of the page
+Filename is taken from column AZ (index 51) - header/title is removed (kept blank)
 """
 
 import pandas as pd
@@ -99,8 +99,8 @@ def sanitize_filename(filename):
     
     return filename
 
-def create_pdf_for_row(row_data, selected_columns, output_filename, title_text):
-    """Create PDF for a single row with only selected columns"""
+def create_pdf_for_row(row_data, selected_columns, output_filename):
+    """Create PDF for a single row with only selected columns - NO HEADER/TITLE"""
     pdf = PDFGenerator()
     pdf.add_page()
     
@@ -108,20 +108,8 @@ def create_pdf_for_row(row_data, selected_columns, output_filename, title_text):
     pdf.set_left_margin(15)
     pdf.set_right_margin(15)
     
-    # Clean title text for display (remove newlines, extra spaces)
-    clean_title = ' '.join(str(title_text).split())
-    
-    # Add title in the middle of the page
-    pdf.set_font('Arial', 'B', 16)
-    
-    # Calculate width to center the text
-    title_width = pdf.get_string_width(clean_title)
-    page_width = pdf.w - 30  # Width minus margins
-    x_position = 15 + (page_width - title_width) / 2  # Center calculation
-    
-    pdf.set_x(x_position)
-    pdf.cell(title_width, 20, clean_title, 0, 1, 'L')
-    pdf.ln(10)
+    # NO TITLE/HEADER - removed completely
+    # Start directly with column data
     
     # Add selected columns data
     pdf.set_font('Arial', '', 10)
@@ -219,13 +207,13 @@ def main():
     print(f"Columns included: {', '.join(selected_columns)}")
     print("-" * 50)
     
-    # Get AZ column (index 51 in 1-based, 50 in 0-based)
+    # Get AZ column (index 51 in 1-based, 50 in 0-based) for FILENAME ONLY
     all_columns = df.columns.tolist()
     if len(all_columns) >= 52:  # Need at least 52 columns for AZ (51 in 1-based)
-        title_column = all_columns[50]  # AZ column (0-based index 50)
-        print(f"📝 Using AZ column '{title_column}' for filename and title")
+        filename_column = all_columns[50]  # AZ column (0-based index 50)
+        print(f"📝 Using AZ column '{filename_column}' for filename ONLY (no header/title)")
     else:
-        title_column = None
+        filename_column = None
         print(f"⚠️  CSV has only {len(all_columns)} columns, AZ column (51) not found. Using row number.")
     
     # Generate PDFs for each row in range
@@ -236,16 +224,14 @@ def main():
         row_data = df.iloc[idx]
         row_num = idx + 1
         
-        # Get title from AZ column
-        if title_column and title_column in row_data.index:
-            title_text = row_data[title_column]
-            if pd.isna(title_text) or title_text == '':
-                title_text = f"Record_{row_num:03d}"
+        # Get filename from AZ column (column 51) - NOT used as header/title
+        if filename_column and filename_column in row_data.index:
+            filename_value = row_data[filename_column]
+            if pd.isna(filename_value) or filename_value == '':
                 base_name = f"record_{row_num:03d}"
             else:
-                base_name = sanitize_filename(title_text)
+                base_name = sanitize_filename(filename_value)
         else:
-            title_text = f"Record_{row_num:03d}"
             base_name = f"record_{row_num:03d}"
         
         # Ensure unique filename by adding row number if needed
@@ -256,7 +242,8 @@ def main():
             output_filename = output_dir / f"{base_name}_{row_num:03d}.pdf"
         
         try:
-            create_pdf_for_row(row_data, selected_columns, output_filename, title_text)
+            # Pass only row_data, selected_columns, and output_filename - NO title parameter
+            create_pdf_for_row(row_data, selected_columns, output_filename)
             generated_files.append(output_filename)
         except Exception as e:
             print(f"  ❌ Failed to generate PDF for row {row_num}: {e}")
@@ -276,8 +263,8 @@ def main():
         f.write(f"CSV Source: {args.csv_url}\n")
         f.write(f"Rows processed: {args.start_row} to {end_idx}\n")
         f.write(f"Columns included: {', '.join(selected_columns)}\n")
-        if title_column:
-            f.write(f"Title from AZ column: {title_column}\n")
+        if filename_column:
+            f.write(f"Filename from AZ column: {filename_column}\n")
         f.write(f"Total PDFs: {len(generated_files)}\n")
         if failed_files:
             f.write(f"Failed rows: {failed_files}\n")
