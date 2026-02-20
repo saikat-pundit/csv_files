@@ -16,7 +16,7 @@ import unicodedata
 
 class PDFGenerator(FPDF):
     def __init__(self):
-        super().__init__()
+        super().__init__(orientation='L')  # ← ADD THIS (line 15-16)
         self.set_auto_page_break(auto=True, margin=15)
     
     def header(self):
