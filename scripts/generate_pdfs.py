@@ -136,7 +136,7 @@ def create_pdf_for_row(row_data, selected_columns, output_filename):
             
             # Calculate available width for value
             page_width = pdf.w - 30  # Subtract margins
-            col_name_width = 45  # Fixed width for column names
+            col_name_width = 65  # ← INCREASE THIS FROM 45 TO 65 (line 116)
             
             # Set X position for consistent alignment
             pdf.set_x(15)
