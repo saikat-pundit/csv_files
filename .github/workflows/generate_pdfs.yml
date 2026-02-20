@@ -1,0 +1,93 @@
+name: Generate PDFs from CSV
+
+on:
+  workflow_dispatch:
+    inputs:
+      csv_url:
+        description: 'CSV File URL'
+        required: true
+        default: 'https://docs.google.com/spreadsheets/d/e/2PACX-1vTBuDewVgTDoc_zaWYQyaWKpBt0RwtFPhnBrpqr1v6Y5wfAmPpEYvTsaWd64bsHhH68iYNtLMSRpOQ0/pub?gid=113399134&single=true&output=csv'
+        type: string
+      start_row:
+        description: 'Start Row Number (1-based)'
+        required: true
+        default: '48'
+        type: string
+      end_row:
+        description: 'End Row Number (1-based)'
+        required: true
+        default: '53'
+        type: string
+
+jobs:
+  generate-pdfs:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+    
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.10'
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+    
+    - name: Create PDFs directory
+      run: mkdir -p pdfs
+    
+    - name: Generate PDFs from CSV
+      run: |
+        python scripts/generate_pdfs.py \
+          --csv-url "${{ github.event.inputs.csv_url }}" \
+          --output-dir pdfs \
+          --start-row ${{ github.event.inputs.start_row }} \
+          --end-row ${{ github.event.inputs.end_row }}
+    
+    - name: Create Release
+      id: create_release
+      uses: softprops/action-gh-release@v1
+      with:
+        name: "PDFs Release - Rows ${{ github.event.inputs.start_row }} to ${{ github.event.inputs.end_row }}"
+        tag_name: "pdfs-v${{ github.run_number }}"
+        files: |
+          pdfs/*.pdf
+          pdfs/summary.txt
+        body: |
+          ## PDF Generation Summary
+          
+          - **Source:** CSV from Google Sheets
+          - **Rows processed:** ${{ github.event.inputs.start_row }} to ${{ github.event.inputs.end_row }}
+          - **Generated:** $(date -u)
+          - **Total PDFs:** ${{ github.event.inputs.end_row - github.event.inputs.start_row + 1 }}
+          
+          ### File List
+          $(for file in pdfs/*.pdf; do echo "- ${file##*/}"; done)
+        draft: false
+        prerelease: false
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    
+    - name: Upload PDFs as Artifacts (Backup)
+      uses: actions/upload-artifact@v4
+      with:
+        name: generated-pdfs
+        path: pdfs/
+        retention-days: 30
+    
+    - name: Commit PDFs to Repository (Optional)
+      if: false  # Set to true if you want PDFs in repo
+      run: |
+        git config --local user.email "github-actions[bot]@users.noreply.github.com"
+        git config --local user.name "github-actions[bot]"
+        git add pdfs/*.pdf pdfs/summary.txt
+        git commit -m "Add generated PDFs for rows ${{ github.event.inputs.start_row }}-${{ github.event.inputs.end_row }} [skip ci]" || exit 0
+        git push
