@@ -43,7 +43,7 @@ jobs:
     - name: Generate PDFs from CSV (Columns AW-BB only)
       run: |
         if [ -z "${{ github.event.inputs.end_row }}" ]; then
-          python scripts/generate_pdfs.py \
+          python scripts/generate_pdfs_nomapping.py \
             --csv-url "${{ github.event.inputs.csv_url }}" \
             --output-dir pdfs \
             --start-row ${{ github.event.inputs.start_row }}
