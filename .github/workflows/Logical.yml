@@ -1,4 +1,4 @@
-name: Generate PDFs No-Mapping
+name: Generate PDFs Logical
 
 on:
   workflow_dispatch:
