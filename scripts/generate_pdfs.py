@@ -2,7 +2,7 @@
 """
 Generate PDFs from specific columns (AW to BB) of CSV rows
 Each row becomes a separate PDF with format: COLUMN HEADER: <ROW DATA>
-Filename is taken from the fourth column (index 3)
+Filename is taken from column index 51 and shown in the middle of the page
 """
 
 import pandas as pd
@@ -69,7 +69,7 @@ def sanitize_filename(filename):
         filename = filename[:50]
     return filename
 
-def create_pdf_for_row(row_data, selected_columns, output_filename, row_num):
+def create_pdf_for_row(row_data, selected_columns, output_filename, title_text):
     """Create PDF for a single row with only selected columns"""
     pdf = PDFGenerator()
     pdf.add_page()
@@ -78,7 +78,17 @@ def create_pdf_for_row(row_data, selected_columns, output_filename, row_num):
     pdf.set_left_margin(15)
     pdf.set_right_margin(15)
     
-    # ROW NUMBER DISPLAY REMOVED - No "Row 1" text
+    # Add title in the middle of the page
+    pdf.set_font('Arial', 'B', 16)
+    
+    # Calculate width to center the text
+    title_width = pdf.get_string_width(title_text)
+    page_width = pdf.w - 30  # Width minus margins
+    x_position = 15 + (page_width - title_width) / 2  # Center calculation
+    
+    pdf.set_x(x_position)
+    pdf.cell(title_width, 20, title_text, 0, 1, 'L')
+    pdf.ln(10)
     
     # Add selected columns data
     pdf.set_font('Arial', '', 10)
@@ -120,10 +130,7 @@ def create_pdf_for_row(row_data, selected_columns, output_filename, row_num):
                 pdf.ln(6)
                 pdf.set_x(15 + col_name_width + 2)
                 
-                # Split long text into multiple lines
-                lines = pdf.multi_cell(remaining_width, 6, value, 0, 'L', split_only=True)
-                
-                # Write first line
+                # Write multi-line text
                 pdf.multi_cell(remaining_width, 6, value, 0, 'L')
             else:
                 pdf.cell(0, 6, value, 0, 1, 'L')
@@ -176,14 +183,14 @@ def main():
     print(f"Columns included: {', '.join(selected_columns)}")
     print("-" * 50)
     
-    # Get the fourth column name (index 3) for filenames
+    # Get column at index 51 for filename and title (0-based index 50)
     all_columns = df.columns.tolist()
-    if len(all_columns) >= 4:
-        filename_column = all_columns[3]  # Fourth column (0-based index 3)
-        print(f"📝 Using column '{filename_column}' for filenames")
+    if len(all_columns) >= 51:
+        title_column = all_columns[50]  # Column index 51 (0-based 50)
+        print(f"📝 Using column '{title_column}' (index 51) for filename and title")
     else:
-        filename_column = None
-        print("⚠️  CSV has less than 4 columns, using row number for filenames")
+        title_column = None
+        print("⚠️  CSV has less than 51 columns, using row number for filename and title")
     
     # Generate PDFs for each row in range
     generated_files = []
@@ -191,19 +198,21 @@ def main():
         row_data = df.iloc[idx]
         row_num = idx + 1
         
-        # Get filename from fourth column
-        if filename_column and filename_column in row_data.index:
-            base_name = str(row_data[filename_column])
-            if pd.isna(base_name) or base_name == '':
-                base_name = f"row_{row_num:03d}"
+        # Get title and filename from column index 51
+        if title_column and title_column in row_data.index:
+            title_text = str(row_data[title_column])
+            if pd.isna(title_text) or title_text == '':
+                title_text = f"Record_{row_num:03d}"
+                base_name = f"record_{row_num:03d}"
             else:
-                base_name = sanitize_filename(base_name)
+                base_name = sanitize_filename(title_text)
         else:
-            base_name = f"row_{row_num:03d}"
+            title_text = f"Record_{row_num:03d}"
+            base_name = f"record_{row_num:03d}"
         
         output_filename = output_dir / f"{base_name}.pdf"
         
-        create_pdf_for_row(row_data, selected_columns, output_filename, row_num)
+        create_pdf_for_row(row_data, selected_columns, output_filename, title_text)
         generated_files.append(output_filename)
     
     print("-" * 50)
@@ -217,8 +226,8 @@ def main():
         f.write(f"CSV Source: {args.csv_url}\n")
         f.write(f"Rows processed: {args.start_row} to {end_idx}\n")
         f.write(f"Columns included: {', '.join(selected_columns)}\n")
-        if filename_column:
-            f.write(f"Filenames from column: {filename_column}\n")
+        if title_column:
+            f.write(f"Title from column: {title_column} (index 51)\n")
         f.write(f"Total PDFs: {len(generated_files)}\n")
         f.write(f"\nGenerated files:\n")
         for pdf in generated_files:
