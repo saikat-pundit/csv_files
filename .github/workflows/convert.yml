@@ -5,15 +5,7 @@ on:
     inputs:
       gdrive_url:
         description: 'Google Drive File URL'
-        required: false
-        type: string
-      gdrive_id:
-        description: 'Google Drive File ID'
-        required: false
-        type: string
-      local_file:
-        description: 'Path to file in repository (if not using Google Drive)'
-        required: false
+        required: true
         type: string
 
 jobs:
@@ -22,47 +14,96 @@ jobs:
     
     steps:
     - name: Checkout repository
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
     
     - name: Set up Python
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v5
       with:
         python-version: '3.9'
     
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install -r requirements.txt
+        pip install gdown pandas
     
-    - name: Create output directory
-      run: mkdir -p output
+    - name: Create data directory
+      run: mkdir -p data
     
-    - name: Download from Google Drive (if URL or ID provided)
-      if: ${{ github.event.inputs.gdrive_url != '' || github.event.inputs.gdrive_id != '' }}
+    - name: Download from Google Drive and Convert
       run: |
-        if [ -n "${{ github.event.inputs.gdrive_url }}" ]; then
-          python scripts/convert_to_csv.py --gdrive-url "${{ github.event.inputs.gdrive_url }}" --output output
-        else
-          python scripts/convert_to_csv.py --gdrive-id "${{ github.event.inputs.gdrive_id }}" --output output
+        # Extract file ID from URL
+        FILE_ID=$(echo "${{ github.event.inputs.gdrive_url }}" | grep -oP '/d/\K[^/]+')
+        
+        # Download file
+        gdown "https://drive.google.com/uc?id=${FILE_ID}" -O data/input_file
+        
+        # Check file type and convert to CSV
+        if [[ -f "data/input_file" ]]; then
+          # Try to parse as JSON/HAR and convert to CSV
+          python3 -c "
+import json
+import csv
+import os
+
+# Read the file
+with open('data/input_file', 'r', encoding='utf-8') as f:
+    try:
+        data = json.load(f)
+    except:
+        print('File is not JSON, copying as text')
+        data = {'content': f.read()}
+
+# Convert to CSV
+def flatten_json(y):
+    out = {}
+    def flatten(x, name=''):
+        if type(x) is dict:
+            for a in x:
+                flatten(x[a], name + a + '_')
+        elif type(x) is list:
+            i = 0
+            for a in x:
+                flatten(a, name + str(i) + '_')
+                i += 1
+        else:
+            out[name[:-1]] = x
+    flatten(y)
+    return out
+
+# If it's a list, convert each item
+if isinstance(data, list):
+    rows = [flatten_json(item) for item in data]
+else:
+    rows = [flatten_json(data)]
+
+# Write to CSV
+with open('data/my.csv', 'w', newline='', encoding='utf-8') as csvfile:
+    if rows:
+        fieldnames = set()
+        for row in rows:
+            fieldnames.update(row.keys())
+        fieldnames = sorted(fieldnames)
+        
+        writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(rows)
+
+print('Conversion complete! Saved to data/my.csv')
+"
         fi
     
-    - name: Convert local file
-      if: ${{ github.event.inputs.local_file != '' }}
-      run: |
-        python scripts/convert_to_csv.py --input "${{ github.event.inputs.local_file }}" --output output
-    
-    - name: Upload CSV artifacts
-      uses: actions/upload-artifact@v3
+    - name: Upload CSV file
+      uses: actions/upload-artifact@v4
       with:
-        name: converted-csv-files
-        path: output/
-        retention-days: 30
+        name: my-csv-file
+        path: data/my.csv
+        retention-days: 7
+        overwrite: true
     
-    - name: Commit and push CSV files (optional)
-      if: false  # Set to true if you want to commit back to repo
+    - name: Commit and push CSV file
       run: |
         git config --local user.email "action@github.com"
         git config --local user.name "GitHub Action"
-        git add output/*.csv
-        git commit -m "Add converted CSV files [skip ci]" || exit 0
+        git add data/my.csv
+        git commit -m "Add converted CSV file [skip ci]" || echo "No changes to commit"
         git push
