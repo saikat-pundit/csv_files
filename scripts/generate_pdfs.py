@@ -47,8 +47,12 @@ def add_signature(pdf):
         sig_path = Path("sign.jpeg")
     if sig_path.exists():
         try:
-            pdf.image(str(sig_path), x=pdf.get_x(), y=pdf.get_y() + 5, w=40, h=20)
-            pdf.ln(25)
+            page_width = pdf.w
+            sig_width = 80  # Increased from 40 to 80
+            sig_height = 40  # Increased from 20 to 40
+            x_position = page_width - sig_width - 15  # Right aligned with margin
+            pdf.image(str(sig_path), x=x_position, y=pdf.get_y() + 5, w=sig_width, h=sig_height)
+            pdf.ln(45)  # Increased from 25 to 45 to accommodate bigger signature
         except:
             pass
 
