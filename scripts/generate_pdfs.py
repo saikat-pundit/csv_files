@@ -2,6 +2,7 @@
 """
 Generate PDFs from specific columns (AW to BB) of CSV rows
 Each row becomes a separate PDF with format: COLUMN HEADER: <ROW DATA>
+Filename is taken from the fourth column (index 3)
 """
 
 import pandas as pd
@@ -10,7 +11,7 @@ from pathlib import Path
 from fpdf import FPDF
 import requests
 from io import StringIO
-import os
+import re
 
 class PDFGenerator(FPDF):
     def __init__(self):
@@ -18,9 +19,8 @@ class PDFGenerator(FPDF):
         self.set_auto_page_break(auto=True, margin=15)
     
     def header(self):
-        self.set_font('Arial', 'B', 14)
-        self.cell(0, 10, 'Row Data Export (Columns AW-BB)', 0, 1, 'C')
-        self.ln(5)
+        # Removed the header text completely
+        pass
     
     def footer(self):
         self.set_y(-15)
@@ -60,18 +60,28 @@ def get_columns_aw_to_bb(df):
         print(f"  Using last {len(selected_columns)} columns instead: {selected_columns}")
         return selected_columns
 
+def sanitize_filename(filename):
+    """Remove invalid characters from filename"""
+    # Remove or replace characters that are invalid in filenames
+    filename = re.sub(r'[<>:"/\\|?*]', '_', filename)
+    # Limit length
+    if len(filename) > 50:
+        filename = filename[:50]
+    return filename
+
 def create_pdf_for_row(row_data, selected_columns, output_filename, row_num):
     """Create PDF for a single row with only selected columns"""
     pdf = PDFGenerator()
     pdf.add_page()
     
-    # Add row information
-    pdf.set_font('Arial', 'B', 12)
-    pdf.cell(0, 10, f"Record #{row_num}", 0, 1, 'L')
-    pdf.ln(5)
+    # Set margins
+    pdf.set_left_margin(15)
+    pdf.set_right_margin(15)
+    
+    # ROW NUMBER DISPLAY REMOVED - No "Row 1" text
     
     # Add selected columns data
-    pdf.set_font('Arial', '', 11)
+    pdf.set_font('Arial', '', 10)
     
     for col in selected_columns:
         if col in row_data.index:
@@ -81,21 +91,45 @@ def create_pdf_for_row(row_data, selected_columns, output_filename, row_num):
             if pd.isna(value) or value == '':
                 value = 'N/A'
             else:
-                value = str(value)
+                value = str(value).strip()
             
-            # Format with column name in bold
-            pdf.set_font('Arial', 'B', 11)
-            pdf.cell(45, 8, f"{col}:", 0, 0, 'L')
-            pdf.set_font('Arial', '', 11)
+            # Skip if value is empty after stripping
+            if not value or value == 'N/A':
+                continue
             
-            # Handle long values with wrapping
-            if pdf.get_string_width(value) > 140:
-                pdf.ln(8)
-                pdf.set_x(15)  # Reset X position
-                pdf.set_font('Arial', '', 11)
-                pdf.multi_cell(0, 8, value)
+            # Column name in bold with consistent width
+            pdf.set_font('Arial', 'B', 10)
+            
+            # Calculate available width for value
+            page_width = pdf.w - 30  # Subtract margins
+            col_name_width = 45  # Fixed width for column names
+            
+            # Set X position for consistent alignment
+            pdf.set_x(15)
+            pdf.cell(col_name_width, 6, f"{col}:", 0, 0, 'L')
+            
+            # Value with wrapping for long text
+            pdf.set_font('Arial', '', 10)
+            
+            # Get remaining width for value
+            remaining_width = page_width - col_name_width - 2
+            
+            # Handle multi-line values
+            if pdf.get_string_width(value) > remaining_width:
+                # Move to next line for value
+                pdf.ln(6)
+                pdf.set_x(15 + col_name_width + 2)
+                
+                # Split long text into multiple lines
+                lines = pdf.multi_cell(remaining_width, 6, value, 0, 'L', split_only=True)
+                
+                # Write first line
+                pdf.multi_cell(remaining_width, 6, value, 0, 'L')
             else:
-                pdf.cell(0, 8, value, 0, 1, 'L')
+                pdf.cell(0, 6, value, 0, 1, 'L')
+            
+            # Small space between fields
+            pdf.ln(1)
     
     # Save the PDF
     pdf.output(output_filename)
@@ -142,12 +176,32 @@ def main():
     print(f"Columns included: {', '.join(selected_columns)}")
     print("-" * 50)
     
+    # Get the fourth column name (index 3) for filenames
+    all_columns = df.columns.tolist()
+    if len(all_columns) >= 4:
+        filename_column = all_columns[3]  # Fourth column (0-based index 3)
+        print(f"📝 Using column '{filename_column}' for filenames")
+    else:
+        filename_column = None
+        print("⚠️  CSV has less than 4 columns, using row number for filenames")
+    
     # Generate PDFs for each row in range
     generated_files = []
     for idx in range(start_idx, end_idx):
         row_data = df.iloc[idx]
         row_num = idx + 1
-        output_filename = output_dir / f"row_{row_num:03d}_AW-BB.pdf"
+        
+        # Get filename from fourth column
+        if filename_column and filename_column in row_data.index:
+            base_name = str(row_data[filename_column])
+            if pd.isna(base_name) or base_name == '':
+                base_name = f"row_{row_num:03d}"
+            else:
+                base_name = sanitize_filename(base_name)
+        else:
+            base_name = f"row_{row_num:03d}"
+        
+        output_filename = output_dir / f"{base_name}.pdf"
         
         create_pdf_for_row(row_data, selected_columns, output_filename, row_num)
         generated_files.append(output_filename)
@@ -163,6 +217,8 @@ def main():
         f.write(f"CSV Source: {args.csv_url}\n")
         f.write(f"Rows processed: {args.start_row} to {end_idx}\n")
         f.write(f"Columns included: {', '.join(selected_columns)}\n")
+        if filename_column:
+            f.write(f"Filenames from column: {filename_column}\n")
         f.write(f"Total PDFs: {len(generated_files)}\n")
         f.write(f"\nGenerated files:\n")
         for pdf in generated_files:
