@@ -48,7 +48,7 @@ jobs:
             --output-dir pdfs \
             --start-row ${{ github.event.inputs.start_row }}
         else
-          python scripts/generate_pdfs.py \
+          python scripts/generate_pdfs_nomapping.py \
             --csv-url "${{ github.event.inputs.csv_url }}" \
             --output-dir pdfs \
             --start-row ${{ github.event.inputs.start_row }} \
