@@ -2,6 +2,7 @@
 """
 Convert HAR/JSON files to CSV
 Supports: .har, .json, .txt files
+Specifically extracts elector data from HAR file responses
 """
 
 import json
@@ -9,11 +10,10 @@ import csv
 import os
 import argparse
 from pathlib import Path
-import glob
 from typing import Dict, List, Any
 
 class HARtoCSVConverter:
-    def __init__(self, input_path: str, output_path: str = "output"):
+    def __init__(self, input_path: str, output_path: str = "CSV"):
         self.input_path = input_path
         self.output_path = output_path
         self.output_dir = Path(output_path)
@@ -28,50 +28,68 @@ class HARtoCSVConverter:
             print(f"Error parsing JSON from {file_path}: {e}")
             return {}
     
-    def extract_har_data(self, har_data: Dict) -> List[Dict]:
-        """Extract relevant data from HAR file"""
+    def extract_elector_data(self, json_data: Dict) -> List[Dict]:
+        """Extract elector data from the specific JSON structure"""
         entries = []
         
         try:
-            if 'log' in har_data and 'entries' in har_data['log']:
-                for entry in har_data['log']['entries']:
-                    row = {
-                        'url': entry.get('request', {}).get('url', ''),
-                        'method': entry.get('request', {}).get('method', ''),
-                        'status': entry.get('response', {}).get('status', ''),
-                        'status_text': entry.get('response', {}).get('statusText', ''),
-                        'time': entry.get('time', ''),
-                        'started_date_time': entry.get('startedDateTime', ''),
-                        'request_headers_size': entry.get('request', {}).get('headersSize', ''),
-                        'response_headers_size': entry.get('response', {}).get('headersSize', ''),
-                        'response_body_size': entry.get('response', {}).get('bodySize', ''),
-                        'content_type': entry.get('response', {}).get('content', {}).get('mimeType', ''),
-                        'server_ip': entry.get('serverIPAddress', ''),
-                        'connection': entry.get('connection', ''),
-                    }
-                    entries.append(row)
+            # Check if this is the elector data response structure
+            if isinstance(json_data, dict):
+                # If it has payload with electorDetailDto
+                if 'payload' in json_data and 'electorDetailDto' in json_data['payload']:
+                    electors = json_data['payload']['electorDetailDto']
+                    for elector in electors:
+                        if isinstance(elector, dict):
+                            # Flatten the elector dictionary
+                            flat_elector = self.flatten_dict(elector)
+                            entries.append(flat_elector)
+                
+                # If it's directly an array of electors
+                elif 'electorDetailDto' in json_data:
+                    electors = json_data['electorDetailDto']
+                    for elector in electors:
+                        if isinstance(elector, dict):
+                            flat_elector = self.flatten_dict(elector)
+                            entries.append(flat_elector)
+                
+                # If it's a list of entries from HAR
+                elif 'log' in json_data and 'entries' in json_data['log']:
+                    for entry in json_data['log']['entries']:
+                        # Check response content
+                        response = entry.get('response', {})
+                        content = response.get('content', {})
+                        text = content.get('text', '')
+                        
+                        if text:
+                            try:
+                                # Parse the response text as JSON
+                                response_data = json.loads(text)
+                                # Extract elector data from this response
+                                elector_entries = self.extract_elector_data(response_data)
+                                entries.extend(elector_entries)
+                            except:
+                                # Not JSON or invalid, skip
+                                pass
         except Exception as e:
-            print(f"Error extracting HAR data: {e}")
+            print(f"Error extracting elector data: {e}")
         
         return entries
     
-    def extract_json_data(self, json_data: Any) -> List[Dict]:
+    def extract_generic_data(self, json_data: Any) -> List[Dict]:
         """Extract data from generic JSON file"""
         entries = []
         
         try:
             if isinstance(json_data, list):
-                # If it's a list, each item becomes a row
                 for item in json_data:
                     if isinstance(item, dict):
                         entries.append(self.flatten_dict(item))
                     else:
                         entries.append({'value': item})
             elif isinstance(json_data, dict):
-                # If it's a dict, flatten it
                 entries.append(self.flatten_dict(json_data))
         except Exception as e:
-            print(f"Error extracting JSON data: {e}")
+            print(f"Error extracting generic data: {e}")
         
         return entries
     
@@ -110,6 +128,7 @@ class HARtoCSVConverter:
                 writer.writerows(data)
             
             print(f"✓ Saved {len(data)} rows to {output_file}")
+            print(f"  Fields: {len(fieldnames)} columns")
             
         except Exception as e:
             print(f"Error saving CSV for {output_filename}: {e}")
@@ -123,11 +142,33 @@ class HARtoCSVConverter:
         if not data:
             return
         
-        # Extract data based on file type
-        if file_path.suffix.lower() == '.har':
-            entries = self.extract_har_data(data)
-        else:  # .json, .txt, etc.
-            entries = self.extract_json_data(data)
+        # Extract data - try elector data first, then fall back to generic
+        entries = self.extract_elector_data(data)
+        
+        if not entries:
+            # If no elector data found, try generic extraction
+            print("  No elector data found, trying generic extraction...")
+            if file_path.suffix.lower() == '.har':
+                # For HAR files, try to extract from entries
+                for entry in data.get('log', {}).get('entries', []):
+                    response = entry.get('response', {})
+                    content = response.get('content', {})
+                    text = content.get('text', '')
+                    if text:
+                        try:
+                            response_data = json.loads(text)
+                            elector_entries = self.extract_elector_data(response_data)
+                            if elector_entries:
+                                entries.extend(elector_entries)
+                        except:
+                            pass
+            
+            if not entries:
+                # Last resort: generic extraction
+                if file_path.suffix.lower() == '.har':
+                    entries = self.extract_generic_data(data)
+                else:
+                    entries = self.extract_generic_data(data)
         
         # Save to CSV
         if entries:
@@ -136,6 +177,12 @@ class HARtoCSVConverter:
             else:
                 output_name = file_path.stem
             self.save_to_csv(entries, output_name)
+            
+            # Print sample of first row
+            if entries:
+                print(f"\n  Sample data (first row keys):")
+                sample_keys = list(entries[0].keys())[:10]  # Show first 10 keys
+                print(f"  {', '.join(sample_keys)}...")
         else:
             print(f"  No entries found in {file_path}")
     
@@ -202,10 +249,22 @@ def main():
             if args.filename:
                 # Convert and save with specific filename
                 data = converter.load_json_file(Path(temp_file))
-                if Path(temp_file).suffix.lower() == '.har':
-                    entries = converter.extract_har_data(data)
-                else:
-                    entries = converter.extract_json_data(data)
+                entries = converter.extract_elector_data(data)
+                if not entries:
+                    # Try HAR structure
+                    if Path(temp_file).suffix.lower() == '.har':
+                        for entry in data.get('log', {}).get('entries', []):
+                            response = entry.get('response', {})
+                            content = response.get('content', {})
+                            text = content.get('text', '')
+                            if text:
+                                try:
+                                    response_data = json.loads(text)
+                                    elector_entries = converter.extract_elector_data(response_data)
+                                    if elector_entries:
+                                        entries.extend(elector_entries)
+                                except:
+                                    pass
                 converter.save_to_csv(entries, args.filename)
             else:
                 converter.convert_all()
@@ -219,10 +278,21 @@ def main():
         if args.filename and Path(args.input).is_file():
             # Single file with custom name
             data = converter.load_json_file(Path(args.input))
-            if Path(args.input).suffix.lower() == '.har':
-                entries = converter.extract_har_data(data)
-            else:
-                entries = converter.extract_json_data(data)
+            entries = converter.extract_elector_data(data)
+            if not entries and Path(args.input).suffix.lower() == '.har':
+                # Try HAR structure
+                for entry in data.get('log', {}).get('entries', []):
+                    response = entry.get('response', {})
+                    content = response.get('content', {})
+                    text = content.get('text', '')
+                    if text:
+                        try:
+                            response_data = json.loads(text)
+                            elector_entries = converter.extract_elector_data(response_data)
+                            if elector_entries:
+                                entries.extend(elector_entries)
+                        except:
+                            pass
             converter.save_to_csv(entries, args.filename)
         else:
             converter.convert_all()
