@@ -117,7 +117,7 @@ def main():
     end_idx = args.end_row if args.end_row else len(df)
     
     all_columns = df.columns.tolist()
-    filename_column = all_columns[50] if len(all_columns) >= 52 else None
+    filename_column = all_columns[51] if len(all_columns) >= 52 else None
     
     for idx in range(start_idx, end_idx):
         row_data = df.iloc[idx]
