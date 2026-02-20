@@ -3,6 +3,7 @@
 Generate PDFs from specific columns (AW to BB) of CSV rows
 Each row becomes a separate PDF with format: COLUMN HEADER: <ROW DATA>
 Filename is taken from column AZ (index 51) - header/title is removed (kept blank)
+Signature image added at bottom right
 """
 
 import pandas as pd
@@ -13,10 +14,11 @@ import requests
 from io import StringIO
 import re
 import unicodedata
+import os
 
 class PDFGenerator(FPDF):
     def __init__(self):
-        super().__init__(orientation='L')  # ← ADD THIS (line 15-16)
+        super().__init__(orientation='L')
         self.set_auto_page_break(auto=True, margin=15)
     
     def header(self):
@@ -99,6 +101,44 @@ def sanitize_filename(filename):
     
     return filename
 
+def add_signature(pdf):
+    """Add signature image at bottom right of the page"""
+    # Check if signature file exists
+    signature_path = Path("sign.jpg")
+    if not signature_path.exists():
+        signature_path = Path("sign.jpeg")
+    
+    if signature_path.exists():
+        try:
+            # Position signature at bottom right
+            # Get page dimensions
+            page_width = pdf.w
+            page_height = pdf.h
+            
+            # Signature dimensions (width, height)
+            sig_width = 50
+            sig_height = 25
+            
+            # Calculate position (bottom right with margin)
+            x_position = page_width - sig_width - 20  # 20 units from right edge
+            y_position = page_height - sig_height - 20  # 20 units from bottom edge
+            
+            # Add signature image
+            pdf.image(str(signature_path), x=x_position, y=y_position, w=sig_width, h=sig_height)
+            
+            # Add "Signature" text below the image
+            pdf.set_xy(x_position, y_position + sig_height + 2)
+            pdf.set_font('Arial', 'I', 8)
+            pdf.cell(sig_width, 5, "Signature", 0, 0, 'C')
+            
+            return True
+        except Exception as e:
+            print(f"  ⚠️ Could not add signature: {e}")
+            return False
+    else:
+        print("  ⚠️ Signature file 'sign.jpg' or 'sign.jpeg' not found")
+        return False
+
 def create_pdf_for_row(row_data, selected_columns, output_filename):
     """Create PDF for a single row with only selected columns - NO HEADER/TITLE"""
     pdf = PDFGenerator()
@@ -113,6 +153,7 @@ def create_pdf_for_row(row_data, selected_columns, output_filename):
     
     # Add selected columns data
     pdf.set_font('Arial', '', 10)
+    y_before_content = pdf.get_y()
     
     for col in selected_columns:
         if col in row_data.index:
@@ -136,7 +177,7 @@ def create_pdf_for_row(row_data, selected_columns, output_filename):
             
             # Calculate available width for value
             page_width = pdf.w - 30  # Subtract margins
-            col_name_width = 65  # ← INCREASE THIS FROM 45 TO 65 (line 116)
+            col_name_width = 65  # Width for column names
             
             # Set X position for consistent alignment
             pdf.set_x(15)
@@ -161,6 +202,19 @@ def create_pdf_for_row(row_data, selected_columns, output_filename):
             
             # Small space between fields
             pdf.ln(1)
+    
+    # Add signature at bottom right
+    y_after_content = pdf.get_y()
+    page_height = pdf.h
+    remaining_space = page_height - y_after_content - 30  # 30 units margin at bottom
+    
+    # Check if there's enough space, if not add a new page
+    if remaining_space < 40:  # Not enough space for signature
+        pdf.add_page()
+        # Reset position on new page
+    
+    # Add signature at bottom right
+    add_signature(pdf)
     
     # Save the PDF
     pdf.output(output_filename)
