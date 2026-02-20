@@ -25,8 +25,8 @@ def download_csv_from_url(url):
 
 def get_columns_aw_to_bb(df):
     all_columns = df.columns.tolist()
-    if len(all_columns) >= 54:
-        return all_columns[48:54]
+    if len(all_columns) >= 55:
+        return all_columns[48:55]
     else:
         return all_columns[-6:]
 
@@ -48,11 +48,11 @@ def add_signature(pdf):
     if sig_path.exists():
         try:
             page_width = pdf.w
-            sig_width = 80  # Increased from 40 to 80
-            sig_height = 40  # Increased from 20 to 40
-            x_position = page_width - sig_width - 15  # Right aligned with margin
+            sig_width = 80
+            sig_height = 40
+            x_position = page_width - sig_width - 15
             pdf.image(str(sig_path), x=x_position, y=pdf.get_y() + 5, w=sig_width, h=sig_height)
-            pdf.ln(45)  # Increased from 25 to 45 to accommodate bigger signature
+            pdf.ln(45)
         except:
             pass
 
@@ -61,6 +61,11 @@ def create_pdf_for_row(row_data, selected_columns, output_filename):
     pdf.add_page()
     pdf.set_left_margin(15)
     pdf.set_right_margin(15)
+    
+    pdf.set_font('Arial', 'B', 18)
+    pdf.cell(0, 15, "HEARING ORDER", 0, 1, 'C')
+    pdf.ln(5)
+    
     pdf.set_font('Arial', '', 10)
     
     for col in selected_columns:
