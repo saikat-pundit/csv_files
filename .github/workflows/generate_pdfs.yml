@@ -1,4 +1,4 @@
-name: Generate PDFs from CSV
+name: Generate PDFs No-Mapping
 
 on:
   workflow_dispatch:
