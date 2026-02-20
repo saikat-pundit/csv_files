@@ -1,4 +1,4 @@
-name: Generate PDFs from CSV
+name: Generate PDFs from CSV (Columns AW-BB)
 
 on:
   workflow_dispatch:
@@ -14,16 +14,14 @@ on:
         default: '48'
         type: string
       end_row:
-        description: 'End Row Number (1-based)'
-        required: true
+        description: 'End Row Number (1-based) (leave empty for all rows)'
+        required: false
         default: '53'
         type: string
 
 jobs:
   generate-pdfs:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
     
     steps:
     - name: Checkout repository
@@ -34,39 +32,43 @@ jobs:
       with:
         python-version: '3.10'
     
-    - name: Upgrade pip and install dependencies
+    - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install --upgrade setuptools wheel
         pip install pandas fpdf2 requests typing-extensions
     
     - name: Create PDFs directory
       run: mkdir -p pdfs
     
-    - name: Generate PDFs from CSV
+    - name: Generate PDFs from CSV (Columns AW-BB only)
       run: |
-        python scripts/generate_pdfs.py \
-          --csv-url "${{ github.event.inputs.csv_url }}" \
-          --output-dir pdfs \
-          --start-row ${{ github.event.inputs.start_row }} \
-          --end-row ${{ github.event.inputs.end_row }}
+        if [ -z "${{ github.event.inputs.end_row }}" ]; then
+          python scripts/generate_pdfs.py \
+            --csv-url "${{ github.event.inputs.csv_url }}" \
+            --output-dir pdfs \
+            --start-row ${{ github.event.inputs.start_row }}
+        else
+          python scripts/generate_pdfs.py \
+            --csv-url "${{ github.event.inputs.csv_url }}" \
+            --output-dir pdfs \
+            --start-row ${{ github.event.inputs.start_row }} \
+            --end-row ${{ github.event.inputs.end_row }}
+        fi
     
-    - name: Create ZIP file
+    - name: Create single ZIP file of all PDFs
       run: |
         cd pdfs
-        zip -r ../pdfs_rows_${{ github.event.inputs.start_row }}_to_${{ github.event.inputs.end_row }}.zip *.pdf summary.txt
+        if [ -n "${{ github.event.inputs.end_row }}" ]; then
+          zip -r ../pdfs_rows_${{ github.event.inputs.start_row }}_to_${{ github.event.inputs.end_row }}.zip *
+        else
+          zip -r ../pdfs_rows_${{ github.event.inputs.start_row }}_onwards.zip *
+        fi
         cd ..
     
-    - name: Upload PDFs as Artifacts
+    - name: Upload single PDF artifact
       uses: actions/upload-artifact@v4
       with:
-        name: pdfs-rows-${{ github.event.inputs.start_row }}-to-${{ github.event.inputs.end_row }}
-        path: pdfs/
-        retention-days: 30
-    
-    - name: Upload ZIP as Artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: pdfs-zip-rows-${{ github.event.inputs.start_row }}-to-${{ github.event.inputs.end_row }}
+        name: generated-pdfs
         path: pdfs_*.zip
         retention-days: 30
+        if-no-files-found: error
