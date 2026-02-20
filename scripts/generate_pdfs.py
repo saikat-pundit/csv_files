@@ -210,7 +210,7 @@ def main():
     # Get AZ column (index 51 in 1-based, 50 in 0-based) for FILENAME ONLY
     all_columns = df.columns.tolist()
     if len(all_columns) >= 52:  # Need at least 52 columns for AZ (51 in 1-based)
-        filename_column = all_columns[50]  # AZ column (0-based index 50)
+        filename_column = all_columns[51]  # AZ column (0-based index 50)
         print(f"📝 Using AZ column '{filename_column}' for filename ONLY (no header/title)")
     else:
         filename_column = None
