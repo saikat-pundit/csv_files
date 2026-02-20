@@ -1,80 +1,77 @@
-name: Generate PDFs from CSV (Columns AW-BB)
+name: Convert HAR/JSON to CSV
 
 on:
   workflow_dispatch:
     inputs:
-      csv_url:
-        description: 'CSV File URL'
-        required: true
-        default: 'https://docs.google.com/spreadsheets/d/e/2PACX-1vTBuDewVgTDoc_zaWYQyaWKpBt0RwtFPhnBrpqr1v6Y5wfAmPpEYvTsaWd64bsHhH68iYNtLMSRpOQ0/pub?gid=113399134&single=true&output=csv'
-        type: string
-      start_row:
-        description: 'Start Row Number (1-based)'
-        required: true
-        default: '48'
-        type: string
-      end_row:
-        description: 'End Row Number (1-based) (leave empty for all rows)'
+      gdrive_url:
+        description: 'Google Drive File URL'
         required: false
-        default: '53'
+        type: string
+      gdrive_id:
+        description: 'Google Drive File ID'
+        required: false
+        type: string
+      local_file:
+        description: 'Path to file in repository (if not using Google Drive)'
+        required: false
         type: string
 
 jobs:
-  generate-pdfs:
+  convert:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write  # This gives write permission to the repository
     
     steps:
     - name: Checkout repository
-      uses: actions/checkout@v4
+      uses: actions/checkout@v3
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
     
     - name: Set up Python
-      uses: actions/setup-python@v5
+      uses: actions/setup-python@v4
       with:
-        python-version: '3.10'
+        python-version: '3.9'
     
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install pandas fpdf2 requests typing-extensions
+        pip install -r requirements.txt
     
-    - name: Create PDFs directory
-      run: mkdir -p pdfs
+    - name: Create CSV directory
+      run: mkdir -p CSV
     
-    - name: Generate PDFs from CSV (Columns AW-BB only)
+    - name: Get next CSV number
+      id: get_number
       run: |
-        if [ -z "${{ github.event.inputs.end_row }}" ]; then
-          python scripts/generate_pdfs.py \
-            --csv-url "${{ github.event.inputs.csv_url }}" \
-            --output-dir pdfs \
-            --start-row ${{ github.event.inputs.start_row }}
+        # Find the highest numbered csv file in CSV folder
+        if ls CSV/csv*.csv 1> /dev/null 2>&1; then
+          MAX_NUM=$(ls CSV/csv*.csv | grep -o '[0-9]\+' | sort -n | tail -1)
+          NEXT_NUM=$((MAX_NUM + 1))
         else
-          python scripts/generate_pdfs.py \
-            --csv-url "${{ github.event.inputs.csv_url }}" \
-            --output-dir pdfs \
-            --start-row ${{ github.event.inputs.start_row }} \
-            --end-row ${{ github.event.inputs.end_row }}
+          NEXT_NUM=1
+        fi
+        echo "next_num=$NEXT_NUM" >> $GITHUB_OUTPUT
+        echo "Next CSV number will be: $NEXT_NUM"
+    
+    - name: Download from Google Drive (if URL or ID provided)
+      if: ${{ github.event.inputs.gdrive_url != '' || github.event.inputs.gdrive_id != '' }}
+      run: |
+        if [ -n "${{ github.event.inputs.gdrive_url }}" ]; then
+          python scripts/convert_to_csv.py --gdrive-url "${{ github.event.inputs.gdrive_url }}" --output CSV --filename "csv${{ steps.get_number.outputs.next_num }}"
+        else
+          python scripts/convert_to_csv.py --gdrive-id "${{ github.event.inputs.gdrive_id }}" --output CSV --filename "csv${{ steps.get_number.outputs.next_num }}"
         fi
     
-    - name: Create ZIP file of PDFs
+    - name: Convert local file
+      if: ${{ github.event.inputs.local_file != '' }}
       run: |
-        cd pdfs
-        if [ -n "${{ github.event.inputs.end_row }}" ]; then
-          zip -r ../pdfs_rows_${{ github.event.inputs.start_row }}_to_${{ github.event.inputs.end_row }}_AW-BB.zip *.pdf summary.txt
-        else
-          zip -r ../pdfs_rows_${{ github.event.inputs.start_row }}_onwards_AW-BB.zip *.pdf summary.txt
-        fi
-        cd ..
+        python scripts/convert_to_csv.py --input "${{ github.event.inputs.local_file }}" --output CSV --filename "csv${{ steps.get_number.outputs.next_num }}"
     
-    - name: Upload PDFs as Artifacts
-      uses: actions/upload-artifact@v4
-      with:
-        name: pdfs-AW-BB-rows-${{ github.event.inputs.start_row }}-to-${{ github.event.inputs.end_row || 'end' }}
-        path: pdfs/
-        retention-days: 30
-    
-    - name: Upload ZIP as Artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: pdfs-AW-BB-zip
-        path: pdfs_*.zip
-        retention-days: 30
+    - name: Commit and push CSV files
+      run: |
+        git config --local user.email "github-actions[bot]@users.noreply.github.com"
+        git config --local user.name "github-actions[bot]"
+        git add CSV/*.csv
+        git diff --quiet && git diff --staged --quiet || git commit -m "Add converted CSV files [skip ci]"
+        git push
