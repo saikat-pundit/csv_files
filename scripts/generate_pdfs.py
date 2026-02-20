@@ -2,7 +2,7 @@
 """
 Generate PDFs from specific columns (AW to BB) of CSV rows
 Each row becomes a separate PDF with format: COLUMN HEADER: <ROW DATA>
-Filename is taken from column index 51 and shown in the middle of the page
+Filename is taken from column AZ (index 51) and shown in the middle of the page
 """
 
 import pandas as pd
@@ -12,6 +12,7 @@ from fpdf import FPDF
 import requests
 from io import StringIO
 import re
+import unicodedata
 
 class PDFGenerator(FPDF):
     def __init__(self):
@@ -61,12 +62,41 @@ def get_columns_aw_to_bb(df):
         return selected_columns
 
 def sanitize_filename(filename):
-    """Remove invalid characters from filename"""
-    # Remove or replace characters that are invalid in filenames
+    """Remove invalid characters from filename for all operating systems"""
+    if pd.isna(filename) or filename == '':
+        return "unnamed"
+    
+    # Convert to string and strip
+    filename = str(filename).strip()
+    
+    # Replace invalid characters with underscore
+    # Invalid chars: < > : " / \ | ? * and control characters
     filename = re.sub(r'[<>:"/\\|?*]', '_', filename)
-    # Limit length
-    if len(filename) > 50:
-        filename = filename[:50]
+    
+    # Remove or replace other problematic characters
+    filename = filename.replace(';', '_')  # Replace semicolons
+    filename = filename.replace(',', '_')  # Replace commas
+    filename = filename.replace('\n', '_')  # Replace newlines
+    filename = filename.replace('\r', '_')  # Replace carriage returns
+    filename = filename.replace('\t', '_')  # Replace tabs
+    
+    # Remove leading/trailing spaces and dots
+    filename = filename.strip('. ')
+    
+    # Normalize unicode characters
+    filename = unicodedata.normalize('NFKD', filename).encode('ASCII', 'ignore').decode('ASCII')
+    
+    # Replace multiple underscores with single underscore
+    filename = re.sub(r'_+', '_', filename)
+    
+    # Limit length to 50 characters (leaving room for extension)
+    if len(filename) > 45:
+        filename = filename[:45]
+    
+    # Ensure filename is not empty after sanitization
+    if not filename or filename.isspace():
+        filename = "unnamed"
+    
     return filename
 
 def create_pdf_for_row(row_data, selected_columns, output_filename, title_text):
@@ -78,16 +108,19 @@ def create_pdf_for_row(row_data, selected_columns, output_filename, title_text):
     pdf.set_left_margin(15)
     pdf.set_right_margin(15)
     
+    # Clean title text for display (remove newlines, extra spaces)
+    clean_title = ' '.join(str(title_text).split())
+    
     # Add title in the middle of the page
     pdf.set_font('Arial', 'B', 16)
     
     # Calculate width to center the text
-    title_width = pdf.get_string_width(title_text)
+    title_width = pdf.get_string_width(clean_title)
     page_width = pdf.w - 30  # Width minus margins
     x_position = 15 + (page_width - title_width) / 2  # Center calculation
     
     pdf.set_x(x_position)
-    pdf.cell(title_width, 20, title_text, 0, 1, 'L')
+    pdf.cell(title_width, 20, clean_title, 0, 1, 'L')
     pdf.ln(10)
     
     # Add selected columns data
@@ -107,6 +140,9 @@ def create_pdf_for_row(row_data, selected_columns, output_filename, title_text):
             if not value or value == 'N/A':
                 continue
             
+            # Clean value for display (remove excessive whitespace)
+            clean_value = ' '.join(value.split())
+            
             # Column name in bold with consistent width
             pdf.set_font('Arial', 'B', 10)
             
@@ -125,15 +161,15 @@ def create_pdf_for_row(row_data, selected_columns, output_filename, title_text):
             remaining_width = page_width - col_name_width - 2
             
             # Handle multi-line values
-            if pdf.get_string_width(value) > remaining_width:
+            if pdf.get_string_width(clean_value) > remaining_width:
                 # Move to next line for value
                 pdf.ln(6)
                 pdf.set_x(15 + col_name_width + 2)
                 
                 # Write multi-line text
-                pdf.multi_cell(remaining_width, 6, value, 0, 'L')
+                pdf.multi_cell(remaining_width, 6, clean_value, 0, 'L')
             else:
-                pdf.cell(0, 6, value, 0, 1, 'L')
+                pdf.cell(0, 6, clean_value, 0, 1, 'L')
             
             # Small space between fields
             pdf.ln(1)
@@ -183,24 +219,26 @@ def main():
     print(f"Columns included: {', '.join(selected_columns)}")
     print("-" * 50)
     
-    # Get column at index 51 for filename and title (0-based index 50)
+    # Get AZ column (index 51 in 1-based, 50 in 0-based)
     all_columns = df.columns.tolist()
-    if len(all_columns) >= 51:
-        title_column = all_columns[50]  # Column index 51 (0-based 50)
-        print(f"📝 Using column '{title_column}' (index 51) for filename and title")
+    if len(all_columns) >= 52:  # Need at least 52 columns for AZ (51 in 1-based)
+        title_column = all_columns[50]  # AZ column (0-based index 50)
+        print(f"📝 Using AZ column '{title_column}' for filename and title")
     else:
         title_column = None
-        print("⚠️  CSV has less than 51 columns, using row number for filename and title")
+        print(f"⚠️  CSV has only {len(all_columns)} columns, AZ column (51) not found. Using row number.")
     
     # Generate PDFs for each row in range
     generated_files = []
+    failed_files = []
+    
     for idx in range(start_idx, end_idx):
         row_data = df.iloc[idx]
         row_num = idx + 1
         
-        # Get title and filename from column index 51
+        # Get title from AZ column
         if title_column and title_column in row_data.index:
-            title_text = str(row_data[title_column])
+            title_text = row_data[title_column]
             if pd.isna(title_text) or title_text == '':
                 title_text = f"Record_{row_num:03d}"
                 base_name = f"record_{row_num:03d}"
@@ -210,13 +248,25 @@ def main():
             title_text = f"Record_{row_num:03d}"
             base_name = f"record_{row_num:03d}"
         
+        # Ensure unique filename by adding row number if needed
         output_filename = output_dir / f"{base_name}.pdf"
         
-        create_pdf_for_row(row_data, selected_columns, output_filename, title_text)
-        generated_files.append(output_filename)
+        # If file exists, add row number to make it unique
+        if output_filename.exists():
+            output_filename = output_dir / f"{base_name}_{row_num:03d}.pdf"
+        
+        try:
+            create_pdf_for_row(row_data, selected_columns, output_filename, title_text)
+            generated_files.append(output_filename)
+        except Exception as e:
+            print(f"  ❌ Failed to generate PDF for row {row_num}: {e}")
+            failed_files.append(row_num)
     
     print("-" * 50)
     print(f"\n✅ Successfully generated {len(generated_files)} PDFs in '{args.output_dir}/'")
+    
+    if failed_files:
+        print(f"❌ Failed to generate PDFs for rows: {failed_files}")
     
     # Create a summary file
     summary_file = output_dir / "summary.txt"
@@ -227,8 +277,10 @@ def main():
         f.write(f"Rows processed: {args.start_row} to {end_idx}\n")
         f.write(f"Columns included: {', '.join(selected_columns)}\n")
         if title_column:
-            f.write(f"Title from column: {title_column} (index 51)\n")
+            f.write(f"Title from AZ column: {title_column}\n")
         f.write(f"Total PDFs: {len(generated_files)}\n")
+        if failed_files:
+            f.write(f"Failed rows: {failed_files}\n")
         f.write(f"\nGenerated files:\n")
         for pdf in generated_files:
             f.write(f"  - {pdf.name}\n")
