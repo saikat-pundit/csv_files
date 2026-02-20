@@ -1,4 +1,4 @@
-name: Generate PDFs from CSV (Columns AW-BB)
+name: Generate PDFs from CSV
 
 on:
   workflow_dispatch:
