@@ -34,35 +34,34 @@ jobs:
         python -m pip install --upgrade pip
         pip install -r requirements.txt
     
-    - name: Create output directory
-      run: mkdir -p output
+    - name: Create CSV directory
+      run: mkdir -p CSV
     
     - name: Download from Google Drive (if URL or ID provided)
       if: ${{ github.event.inputs.gdrive_url != '' || github.event.inputs.gdrive_id != '' }}
       run: |
         if [ -n "${{ github.event.inputs.gdrive_url }}" ]; then
-          python scripts/convert_to_csv.py --gdrive-url "${{ github.event.inputs.gdrive_url }}" --output output
+          python scripts/convert_to_csv.py --gdrive-url "${{ github.event.inputs.gdrive_url }}" --output CSV
         else
-          python scripts/convert_to_csv.py --gdrive-id "${{ github.event.inputs.gdrive_id }}" --output output
+          python scripts/convert_to_csv.py --gdrive-id "${{ github.event.inputs.gdrive_id }}" --output CSV
         fi
     
     - name: Convert local file
       if: ${{ github.event.inputs.local_file != '' }}
       run: |
-        python scripts/convert_to_csv.py --input "${{ github.event.inputs.local_file }}" --output output
+        python scripts/convert_to_csv.py --input "${{ github.event.inputs.local_file }}" --output CSV
     
     - name: Upload CSV artifacts
       uses: actions/upload-artifact@v4
       with:
         name: converted-csv-files
-        path: output/
+        path: CSV/
         retention-days: 30
     
-    - name: Commit and push CSV files (optional)
-      if: false  # Set to true if you want to commit back to repo
+    - name: Commit and push CSV files
       run: |
         git config --local user.email "action@github.com"
         git config --local user.name "GitHub Action"
-        git add output/*.csv
+        git add CSV/*.csv
         git commit -m "Add converted CSV files [skip ci]" || exit 0
         git push
