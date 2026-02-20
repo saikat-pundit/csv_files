@@ -1,0 +1,68 @@
+name: Convert HAR/JSON to CSV
+
+on:
+  workflow_dispatch:
+    inputs:
+      gdrive_url:
+        description: 'Google Drive File URL'
+        required: false
+        type: string
+      gdrive_id:
+        description: 'Google Drive File ID'
+        required: false
+        type: string
+      local_file:
+        description: 'Path to file in repository (if not using Google Drive)'
+        required: false
+        type: string
+
+jobs:
+  convert:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v3
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.9'
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+    
+    - name: Create output directory
+      run: mkdir -p output
+    
+    - name: Download from Google Drive (if URL or ID provided)
+      if: ${{ github.event.inputs.gdrive_url != '' || github.event.inputs.gdrive_id != '' }}
+      run: |
+        if [ -n "${{ github.event.inputs.gdrive_url }}" ]; then
+          python scripts/convert_to_csv.py --gdrive-url "${{ github.event.inputs.gdrive_url }}" --output output
+        else
+          python scripts/convert_to_csv.py --gdrive-id "${{ github.event.inputs.gdrive_id }}" --output output
+        fi
+    
+    - name: Convert local file
+      if: ${{ github.event.inputs.local_file != '' }}
+      run: |
+        python scripts/convert_to_csv.py --input "${{ github.event.inputs.local_file }}" --output output
+    
+    - name: Upload CSV artifacts
+      uses: actions/upload-artifact@v3
+      with:
+        name: converted-csv-files
+        path: output/
+        retention-days: 30
+    
+    - name: Commit and push CSV files (optional)
+      if: false  # Set to true if you want to commit back to repo
+      run: |
+        git config --local user.email "action@github.com"
+        git config --local user.name "GitHub Action"
+        git add output/*.csv
+        git commit -m "Add converted CSV files [skip ci]" || exit 0
+        git push
