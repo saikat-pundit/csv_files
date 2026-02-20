@@ -10,7 +10,6 @@ import os
 import argparse
 from pathlib import Path
 import glob
-import pandas as pd
 from typing import Dict, List, Any
 
 class HARtoCSVConverter:
@@ -65,7 +64,7 @@ class HARtoCSVConverter:
                 # If it's a list, each item becomes a row
                 for item in json_data:
                     if isinstance(item, dict):
-                        entries.append(item)
+                        entries.append(self.flatten_dict(item))
                     else:
                         entries.append({'value': item})
             elif isinstance(json_data, dict):
@@ -115,7 +114,7 @@ class HARtoCSVConverter:
         except Exception as e:
             print(f"Error saving CSV for {output_filename}: {e}")
     
-    def convert_file(self, file_path: Path):
+    def convert_file(self, file_path: Path, custom_filename: str = None):
         """Convert a single file to CSV"""
         print(f"\nProcessing: {file_path}")
         
@@ -132,7 +131,10 @@ class HARtoCSVConverter:
         
         # Save to CSV
         if entries:
-            output_name = file_path.stem
+            if custom_filename:
+                output_name = custom_filename
+            else:
+                output_name = file_path.stem
             self.save_to_csv(entries, output_name)
         else:
             print(f"  No entries found in {file_path}")
@@ -168,7 +170,8 @@ def download_from_gdrive(file_id: str, output_path: str):
 def main():
     parser = argparse.ArgumentParser(description='Convert HAR/JSON files to CSV')
     parser.add_argument('--input', '-i', help='Input file or directory path')
-    parser.add_argument('--output', '-o', default='output', help='Output directory path')
+    parser.add_argument('--output', '-o', default='CSV', help='Output directory path')
+    parser.add_argument('--filename', '-f', help='Output filename (without extension)')
     parser.add_argument('--gdrive-id', help='Google Drive file ID to download')
     parser.add_argument('--gdrive-url', help='Google Drive sharing URL')
     
@@ -196,7 +199,16 @@ def main():
         
         if download_from_gdrive(file_id, temp_file):
             converter = HARtoCSVConverter(temp_file, args.output)
-            converter.convert_all()
+            if args.filename:
+                # Convert and save with specific filename
+                data = converter.load_json_file(Path(temp_file))
+                if Path(temp_file).suffix.lower() == '.har':
+                    entries = converter.extract_har_data(data)
+                else:
+                    entries = converter.extract_json_data(data)
+                converter.save_to_csv(entries, args.filename)
+            else:
+                converter.convert_all()
     else:
         # Use local file/directory
         if not args.input:
@@ -204,7 +216,16 @@ def main():
             return
         
         converter = HARtoCSVConverter(args.input, args.output)
-        converter.convert_all()
+        if args.filename and Path(args.input).is_file():
+            # Single file with custom name
+            data = converter.load_json_file(Path(args.input))
+            if Path(args.input).suffix.lower() == '.har':
+                entries = converter.extract_har_data(data)
+            else:
+                entries = converter.extract_json_data(data)
+            converter.save_to_csv(entries, args.filename)
+        else:
+            converter.convert_all()
     
     print("\n✅ Conversion complete!")
 
