@@ -7,27 +7,41 @@ from io import StringIO
 import re
 import unicodedata
 
+def fix_encoding(text):
+    """Fix common encoding issues with special characters"""
+    if not isinstance(text, str):
+        return text
+    
+    # Replace common problematic character sequences
+    replacements = {
+        'â€‘': '–',
+        'â€™': "'",
+        'â€œ': '"',
+        'â€': '"',
+        'Ã¢Â€Â‘': '–',
+        'Ã¢Â€Â™': "'",
+        'â€˜': "'",
+        'â€¢': '•',
+        'â€¦': '…',
+        'â€“': '–',
+        'â€”': '—',
+    }
+    
+    for wrong, correct in replacements.items():
+        text = text.replace(wrong, correct)
+    
+    return text
+
 class PDFGenerator(FPDF):
     def __init__(self):
         super().__init__(orientation='L')
         self.set_auto_page_break(auto=True, margin=15)
-        self.core_fonts_encoding = 'utf-8'
+
 def download_csv_from_url(url):
     try:
         response = requests.get(url)
         response.raise_for_status()
-        
-        # Handle encoding properly
-        content = response.content
-        try:
-            decoded = content.decode('utf-8')
-        except UnicodeDecodeError:
-            try:
-                decoded = content.decode('latin-1')
-            except:
-                decoded = content.decode('utf-8', errors='ignore')
-        
-        df = pd.read_csv(StringIO(decoded))
+        df = pd.read_csv(StringIO(response.text))
         print(f"✓ Downloaded CSV with {len(df)} rows")
         return df
     except Exception as e:
@@ -85,6 +99,7 @@ def create_pdf_for_row(row_data, selected_columns, output_filename):
             if pd.isna(value) or value == '':
                 continue
             value = str(value).strip()
+            value = fix_encoding(value)
             if not value:
                 continue
             
