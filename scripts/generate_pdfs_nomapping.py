@@ -16,7 +16,18 @@ def download_csv_from_url(url):
     try:
         response = requests.get(url)
         response.raise_for_status()
-        df = pd.read_csv(StringIO(response.text))
+        
+        # Handle encoding properly
+        content = response.content
+        try:
+            decoded = content.decode('utf-8')
+        except UnicodeDecodeError:
+            try:
+                decoded = content.decode('latin-1')
+            except:
+                decoded = content.decode('utf-8', errors='ignore')
+        
+        df = pd.read_csv(StringIO(decoded))
         print(f"✓ Downloaded CSV with {len(df)} rows")
         return df
     except Exception as e:
