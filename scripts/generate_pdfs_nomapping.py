@@ -11,7 +11,9 @@ class PDFGenerator(FPDF):
     def __init__(self):
         super().__init__(orientation='L')
         self.set_auto_page_break(auto=True, margin=15)
-        self.core_fonts_encoding = "utf-8"
+        from fpdf.fonts import FontFace
+        self.add_font('Arial', '', 'arial.ttf', uni=True)
+        self.add_font('Arial', 'B', 'arialbd.ttf', uni=True)
 def download_csv_from_url(url):
     try:
         response = requests.get(url)
