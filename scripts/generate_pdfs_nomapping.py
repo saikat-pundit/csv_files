@@ -1,149 +1,28 @@
 import pandas as pd
-import argparse
+import argparse, re
 from pathlib import Path
 from fpdf import FPDF
-import requests
-from io import StringIO
-import re
-import unicodedata
 
-def fix_encoding(text):
-    """Fix common encoding issues with special characters"""
-    if not isinstance(text, str):
-        return text
+def fix_text(text):
+    """Robustly fix corrupted text and convert to FPDF-safe ASCII"""
+    if pd.isna(text) or text == '': return ""
+    text = str(text).strip()
     
-    # 1. Try to reverse double-encoding (UTF-8 read as Windows-1252)
-    try:
-        text = text.encode('cp1252').decode('utf-8')
-    except (UnicodeEncodeError, UnicodeDecodeError):
-        pass
+    # 1. Fix Mojibake (Double-encoding: CP1252 -> UTF-8)
+    try: text = text.encode('cp1252').decode('utf-8')
+    except: pass
+    
+    # 2. Convert standard Unicode punctuation to basic ASCII
+    replacements = {"‘":"'", "’":"'", "“":'"', "”":'"', "–":"-", "—":"-", "…":"...", "•":"-", "\u2011":"-"}
+    for k, v in replacements.items(): text = text.replace(k, v)
+    
+    # 3. Strip remaining unsupported characters to prevent FPDF crash
+    return text.encode('latin-1', 'ignore').decode('latin-1')
 
-    # 2. Map mangled characters and Unicode to safe ASCII for FPDF
-    replacements = {
-        'â€TM': "'",   # Fix for fatherâ€TMs
-        'â€‘': '-',    # Fix for selfâ€‘Aadhaar
-        'â€™': "'",
-        'â€œ': '"',
-        'â€': '"',
-        'â€': '"',
-        'Ã¢Â€Â‘': '-',
-        'Ã¢Â€Â™': "'",
-        'â€˜': "'",
-        'â€¢': '-',
-        'â€¦': '...',
-        'â€“': '-',
-        'â€”': '-',
-        # Catch standard Unicode smart quotes/dashes just in case
-        '’': "'",
-        '‘': "'",
-        '“': '"',
-        '”': '"',
-        '–': '-',
-        '—': '-',
-        '…': '...',
-        '•': '-',
-        '\u2011': '-', # Non-breaking hyphen
-    }
-    
-    for wrong, correct in replacements.items():
-        text = text.replace(wrong, correct)
-    
-    # 3. Strip any remaining unsupported characters so FPDF doesn't crash
-    text = text.encode('latin-1', 'ignore').decode('latin-1')
-    
-    return text
-
-class PDFGenerator(FPDF):
+class PDFGen(FPDF):
     def __init__(self):
         super().__init__(orientation='L')
         self.set_auto_page_break(auto=True, margin=15)
-
-def download_csv_from_url(url):
-    try:
-        response = requests.get(url)
-        response.raise_for_status()
-        df = pd.read_csv(StringIO(response.text))
-        print(f"✓ Downloaded CSV with {len(df)} rows")
-        return df
-    except Exception as e:
-        print(f"Error: {e}")
-        return None
-
-def get_columns_aw_to_bb(df):
-    all_columns = df.columns.tolist()
-    if len(all_columns) >= 55:
-        return all_columns[48:55]
-    else:
-        return all_columns[-6:]
-
-def sanitize_filename(filename):
-    if pd.isna(filename) or filename == '':
-        return "unnamed"
-    filename = str(filename).strip()
-    filename = re.sub(r'[<>:"/\\|?*;,]', '_', filename)
-    filename = re.sub(r'\s+', '_', filename)
-    filename = filename.strip('_')
-    if len(filename) > 45:
-        filename = filename[:45]
-    return filename or "unnamed"
-
-def add_signature(pdf):
-    sig_path = Path("sign.jpg")
-    if not sig_path.exists():
-        sig_path = Path("sign.jpeg")
-    if sig_path.exists():
-        try:
-            page_width = pdf.w
-            sig_width = 80
-            sig_height = 40
-            x_position = page_width - sig_width - 15
-            pdf.image(str(sig_path), x=x_position, y=pdf.get_y() + 5, w=sig_width, h=sig_height)
-            pdf.ln(45)
-        except:
-            pass
-
-def create_pdf_for_row(row_data, selected_columns, output_filename):
-    pdf = PDFGenerator()
-    pdf.add_page()
-    pdf.set_left_margin(15)
-    pdf.set_right_margin(15)
-    
-    pdf.set_font('Arial', 'B', 18)
-    pdf.cell(0, 15, "HEARING ORDER", 0, 1, 'C')
-    pdf.ln(5)
-    
-    pdf.set_font('Arial', '', 10)
-    
-    for col in selected_columns:
-        if col in row_data.index:
-            value = row_data[col]
-            if pd.isna(value) or value == '':
-                continue
-            value = str(value).strip()
-            value = fix_encoding(value)
-            if not value:
-                continue
-            
-            pdf.set_font('Arial', 'B', 10)
-            pdf.set_x(15)
-            pdf.cell(65, 6, f"{col}:", 0, 0, 'L')
-            
-            pdf.set_font('Arial', '', 10)
-            clean_value = ' '.join(value.split())
-            remaining_width = pdf.w - 30 - 65 - 2
-            
-            if pdf.get_string_width(clean_value) > remaining_width:
-                pdf.ln(6)
-                pdf.set_x(15 + 65 + 2)
-                pdf.multi_cell(remaining_width, 6, clean_value, 0, 'L')
-            else:
-                pdf.cell(0, 6, clean_value, 0, 1, 'L')
-            pdf.ln(2)
-    
-    pdf.ln(5)
-    add_signature(pdf)
-    pdf.output(output_filename)
-    print(f"  ✓ {output_filename.name}")
 
 def main():
     parser = argparse.ArgumentParser()
@@ -152,42 +31,75 @@ def main():
     parser.add_argument('--start-row', type=int, default=1)
     parser.add_argument('--end-row', type=int, default=None)
     args = parser.parse_args()
-    
-    output_dir = Path(args.output_dir)
-    output_dir.mkdir(exist_ok=True)
-    
-    df = download_csv_from_url(args.csv_url)
-    if df is None:
-        return
-    
-    selected_columns = get_columns_aw_to_bb(df)
-    if not selected_columns:
-        print("No columns selected")
-        return
-    
-    start_idx = args.start_row - 1
-    end_idx = args.end_row if args.end_row else len(df)
-    
-    all_columns = df.columns.tolist()
-    filename_column = all_columns[51] if len(all_columns) >= 52 else None
-    
-    for idx in range(start_idx, end_idx):
-        row_data = df.iloc[idx]
-        row_num = idx + 1
+
+    out_dir = Path(args.output_dir)
+    out_dir.mkdir(exist_ok=True)
+
+    # LET PANDAS HANDLE THE DOWNLOAD - Forces correct UTF-8 encoding natively
+    try:
+        df = pd.read_csv(args.csv_url, encoding='utf-8')
+        print(f"✓ Downloaded CSV with {len(df)} rows")
+    except Exception as e:
+        return print(f"❌ Failed to download/read CSV: {e}")
+
+    cols = df.columns.tolist()
+    sel_cols = cols[48:55] if len(cols) >= 55 else cols[-6:]
+    if not sel_cols: return print("No columns selected")
+
+    fname_col = cols[51] if len(cols) >= 52 else None
+    end_idx = args.end_row or len(df)
+
+    for idx in range(args.start_row - 1, end_idx):
+        row = df.iloc[idx]
+        r_num = idx + 1
         
-        if filename_column and filename_column in row_data.index:
-            base_name = sanitize_filename(row_data[filename_column])
-        else:
-            base_name = f"record_{row_num:03d}"
+        # Determine Filename
+        base_name = "unnamed"
+        if fname_col and pd.notna(row.get(fname_col)):
+            base_name = re.sub(r'[<>:"/\\|?*;\s,]+', '_', str(row[fname_col]).strip())[:45].strip('_')
         
-        output_filename = output_dir / f"{base_name}.pdf"
-        if output_filename.exists():
-            output_filename = output_dir / f"{base_name}_{row_num:03d}.pdf"
-        
+        out_path = out_dir / f"{base_name or 'unnamed'}.pdf"
+        if out_path.exists(): out_path = out_dir / f"{base_name}_{r_num:03d}.pdf"
+
         try:
-            create_pdf_for_row(row_data, selected_columns, output_filename)
+            pdf = PDFGen()
+            pdf.add_page()
+            pdf.set_font('Arial', 'B', 18)
+            pdf.cell(0, 15, "HEARING ORDER", 0, 1, 'C')
+            pdf.ln(5)
+
+            # Add Row Data
+            for col in sel_cols:
+                val = fix_text(row.get(col))
+                if not val: continue
+                
+                pdf.set_font('Arial', 'B', 10)
+                pdf.set_x(15)
+                pdf.cell(65, 6, f"{col}:", 0, 0, 'L')
+                
+                pdf.set_font('Arial', '', 10)
+                val = ' '.join(val.split())
+                rem_w = pdf.w - 97 # Page width - margins and label width
+                
+                if pdf.get_string_width(val) > rem_w:
+                    pdf.ln(6)
+                    pdf.set_x(82)
+                    pdf.multi_cell(rem_w, 6, val, 0, 'L')
+                else:
+                    pdf.cell(0, 6, val, 0, 1, 'L')
+                pdf.ln(2)
+
+            # Add Signature
+            pdf.ln(5)
+            sig = Path("sign.jpg") if Path("sign.jpg").exists() else Path("sign.jpeg")
+            if sig.exists():
+                try: pdf.image(str(sig), x=pdf.w - 95, y=pdf.get_y() + 5, w=80, h=40)
+                except: pass
+
+            pdf.output(out_path)
+            print(f"  ✓ {out_path.name}")
         except Exception as e:
-            print(f"  ❌ Row {row_num} failed: {e}")
+            print(f"  ❌ Row {r_num} failed: {e}")
 
 if __name__ == "__main__":
     main()
