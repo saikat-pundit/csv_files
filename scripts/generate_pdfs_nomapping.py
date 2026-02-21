@@ -12,23 +12,44 @@ def fix_encoding(text):
     if not isinstance(text, str):
         return text
     
-    # Replace common problematic character sequences
+    # 1. Try to reverse double-encoding (UTF-8 read as Windows-1252)
+    try:
+        text = text.encode('cp1252').decode('utf-8')
+    except (UnicodeEncodeError, UnicodeDecodeError):
+        pass
+
+    # 2. Map mangled characters and Unicode to safe ASCII for FPDF
     replacements = {
-        'â€‘': '–',
+        'â€TM': "'",   # Fix for fatherâ€TMs
+        'â€‘': '-',    # Fix for selfâ€‘Aadhaar
         'â€™': "'",
         'â€œ': '"',
+        'â€': '"',
         'â€': '"',
-        'Ã¢Â€Â‘': '–',
+        'Ã¢Â€Â‘': '-',
         'Ã¢Â€Â™': "'",
         'â€˜': "'",
-        'â€¢': '•',
-        'â€¦': '…',
-        'â€“': '–',
-        'â€”': '—',
+        'â€¢': '-',
+        'â€¦': '...',
+        'â€“': '-',
+        'â€”': '-',
+        # Catch standard Unicode smart quotes/dashes just in case
+        '’': "'",
+        '‘': "'",
+        '“': '"',
+        '”': '"',
+        '–': '-',
+        '—': '-',
+        '…': '...',
+        '•': '-',
+        '\u2011': '-', # Non-breaking hyphen
     }
     
     for wrong, correct in replacements.items():
         text = text.replace(wrong, correct)
+    
+    # 3. Strip any remaining unsupported characters so FPDF doesn't crash
+    text = text.encode('latin-1', 'ignore').decode('latin-1')
     
     return text
 
